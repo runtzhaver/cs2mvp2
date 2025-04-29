@@ -1,0 +1,9 @@
+pandas
+numpy
+sqlalchemy
+streamlit
+psycopg2-binary
+scipy
+statsmodels
+pymc
+tqdm
