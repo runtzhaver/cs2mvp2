@@ -1,0 +1,70 @@
+
+import os
+import streamlit as st
+import sqlalchemy as sa
+import pandas as pd
+
+# ─ Database connection ────────────────────────────────────────────────────────
+DB_URL = os.getenv("POSTGRES_URL")
+engine = sa.create_engine(DB_URL)
+
+# ─ Sidebar controls ───────────────────────────────────────────────────────────
+st.sidebar.header("Select Matchup")
+teams_a = pd.read_sql("SELECT DISTINCT team_a AS team FROM maps", engine)["team"].dropna().unique()
+teams_b = pd.read_sql("SELECT DISTINCT team_b AS team FROM maps", engine)["team"].dropna().unique()
+teams = sorted(list(set(list(teams_a) + list(teams_b))))
+team_a = st.sidebar.selectbox("Team A", teams, index=0)
+team_b = st.sidebar.selectbox("Team B", [t for t in teams if t != team_a], index=0)
+
+# ─ Summary cards ─────────────────────────────────────────────────────────────
+ratings = pd.read_sql("SELECT * FROM team_ratings", engine).set_index("team")["elo"]
+elo_a = ratings.get(team_a, float("nan"))
+elo_b = ratings.get(team_b, float("nan"))
+prob_a = 1 / (1 + 10 ** ((elo_b - elo_a) / 400)) if not (pd.isna(elo_a) or pd.isna(elo_b)) else None
+
+col1, col2, col3 = st.columns(3)
+col1.metric(f"{team_a} Elo", f"{elo_a:.0f}")
+col2.metric(f"{team_b} Elo", f"{elo_b:.0f}")
+col3.metric(f"Win% {team_a}", f"{prob_a:.1%}" if prob_a is not None else "N/A")
+
+# ─ Insight panels ────────────────────────────────────────────────────────────
+st.sidebar.markdown("## Insights")
+# CT bias
+ct = pd.read_sql("SELECT * FROM ct_bias", engine)
+if not ct.empty:
+    last = ct.iloc[-1]
+    st.sidebar.write(f"CT Win% (latest month): {last.ct_win_pct:.1%}")
+# Roster volatility
+vol = pd.read_sql("SELECT * FROM roster_vol", engine).set_index("team_a")
+if team_a in vol.index:
+    st.sidebar.write(f"Roster Volatility: {vol.loc[team_a,'volatility']}")
+# Stand-in impact
+std = pd.read_sql("SELECT * FROM standin_delta", engine).set_index("team")
+if team_a in std.index:
+    st.sidebar.warning(f"Stand‑in Δ: {std.loc[team_a,'delta']:.2f}")
+
+# ─ Main tabs ─────────────────────────────────────────────────────────────────
+tabs = st.tabs(["Maps & Props", "Exact Scores", "Series Scores", "Futures"])
+with tabs[0]:
+    st.subheader("Recent Maps")
+    df_maps = pd.read_sql(
+        f"SELECT * FROM maps WHERE team_a = '{team_a}' AND team_b = '{team_b}' "
+        "ORDER BY begin_at DESC LIMIT 20", engine
+    )
+    st.dataframe(df_maps)
+
+with tabs[1]:
+    st.subheader("Exact Score Probabilities")
+    st.write("Coming soon…")
+
+with tabs[2]:
+    st.subheader("Series Correct Scores")
+    st.write("Coming soon…")
+
+with tabs[3]:
+    st.subheader("Event Futures")
+    df_fut = pd.read_sql("SELECT * FROM futures", engine)
+    st.dataframe(df_fut)
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Last updated nightly at 03:00 UTC")
